@@ -1,0 +1,12 @@
+# Frontend
+sentinel-bms-ui/node_modules/
+sentinel-bms-ui/dist/
+sentinel-bms-ui/.env
+
+# Backend
+sentinel-bms-backend/__pycache__/
+sentinel-bms-backend/venv/
+.DS_Store
+
+# IDE
+.vscode/
