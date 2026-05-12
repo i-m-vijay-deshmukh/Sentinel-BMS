@@ -9,7 +9,7 @@ const char* password = "123456789";
 
 // IMPORTANT: Change this to your Render URL when deploying to the cloud
 // If testing locally, keep it as "http://YOUR_IPV4:8000/api/esp32_push"
-const char* target_ip = "https://your-backend-name.onrender.com/api/esp32_push";
+const char* target_ip = "https://sentinel-bms.onrender.com/api/esp32_push";
 
 // --- PINS ---
 #define PIN_V1      34
