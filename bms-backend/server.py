@@ -13,19 +13,22 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# Shared system memory
 latest_state = {
     "cell1": 0.0, "cell2": 0.0, "cell3": 0.0,
     "current": 0.0, "temp": 0.0, "charging": False,
-    "discharge_active": True, "soh": 100.0 
+    "discharge_active": True, 
+    "soh": 100.0,
+    "soc_pack": 0.0,
+    "soh_cell1": 100.0,
+    "soh_cell2": 100.0,
+    "soh_cell3": 100.0
 }
 
-# Load ML Model
 try:
     soh_model = joblib.load('bms_soh_model.pkl')
-    print("Sentinel-ML Model active.")
-except:
-    print("Warning: ML Model not found.")
+    print("Sentinel-BMS Multiplexed Model active.")
+except Exception as e:
+    print(f"Warning: ML Model not found. Error: {e}")
 
 class BMSData(BaseModel):
     cell1: float
@@ -41,20 +44,37 @@ class PowerState(BaseModel):
 @app.post("/api/esp32_push")
 async def receive_esp32_data(data: BMSData):
     global latest_state
+    
     latest_state.update(data.dict())
 
     # CRITICAL HARDWARE INTERLOCK: Discharge must be OFF if charging
     if data.charging:
         latest_state["discharge_active"] = False
 
-    # State of Health Inference during active discharge
+    # State of Health & Charge Estimation Inference during active discharge
     if not data.charging and abs(data.current) > 0.5:
         try:
-            avg_v = (data.cell1 + data.cell2 + data.cell3) / 3.0
-            features = np.array([[avg_v, abs(data.current), data.temp]])
-            pred_soh = soh_model.predict(features)[0]
-            latest_state["soh"] = (latest_state["soh"] * 0.98) + (pred_soh * 0.02)
-        except:
+            # Call the predictive layout with individual data coordinates
+            result = soh_model.predict(
+                cell1_v=data.cell1,
+                cell2_v=data.cell2,
+                cell3_v=data.cell3,
+                current=data.current,
+                temp=data.temp
+            )
+            # 1. Individual SOH allocations
+            latest_state["soh_cell1"] = result["soh_cell1"]
+            latest_state["soh_cell2"] = result["soh_cell2"]
+            latest_state["soh_cell3"] = result["soh_cell3"]
+            
+            # 2. SOH-weighted Pack SOC estimation
+            latest_state["soc_pack"] = result["soc_pack"]
+            
+            # maps directly to the weakest link (pack SOH)
+            latest_state["soh"] = result["soh_pack"]
+            
+        except Exception as e:
+            print(f"Inference computation error: {e}")
             pass
 
     return {"status": "success", "discharge_enabled": latest_state["discharge_active"]}

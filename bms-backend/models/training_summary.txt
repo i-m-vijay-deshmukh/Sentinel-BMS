@@ -1,0 +1,61 @@
+=================================================================
+  Sentinel-BMS  —  Training Summary
+  3S Li-Ion Pack  |  bms_soh_model.pkl
+=================================================================
+
+MODEL INPUTS (at inference / server.py call)
+---------------------------------------------
+  cell1_V, cell2_V, cell3_V  – terminal voltage [V]
+  current                    – pack current [A]
+  temp                       – temperature [°C]
+
+MODEL OUTPUTS
+---------------------------------------------
+  soh_cell1
+  soh_cell2
+  soh_cell3
+  soh_pack
+  soc_cell1
+  soc_cell2
+  soc_cell3
+  soc_pack
+  r_est_cell1
+  r_est_cell2
+  r_est_cell3
+  ocv_cell1
+  ocv_cell2
+  ocv_cell3
+
+CROSS-VALIDATION METRICS (5-fold)
+---------------------------------------------
+  cv_rmse_mean             : 22.8612
+  cv_rmse_std              : 0.7410
+  cv_mae_mean              : 18.7957
+  cv_mae_std               : 0.7324
+
+HOLD-OUT TEST METRICS (20%)
+---------------------------------------------
+  test_rmse                : 23.2908
+  test_mae                 : 19.1406
+  test_r2                  : -0.5199
+  test_bias                : 1.9695
+  pred_fresh_mean          : 64.0619
+  pred_aged_mean           : 63.5216
+
+PHYSICS CONSTANTS
+---------------------------------------------
+  R_fresh_ohm    : 0.047
+  R_aged_ohm     : 0.252
+  SOH_fresh_pct  : 100.0
+  SOH_aged_pct   : 27.79
+  R0_nominal_ohm : 0.05
+  EOL_SOH_pct    : 80.0
+  OCV table pts  : 21
+  OCV range      : [3.0, 4.2] V
+  SOC range      : [0.0, 1.0]
+
+VOLTAGE SAG CORRECTION
+---------------------------------------------
+  V_oc = V_terminal + I_signed × R_internal
+  SOC  = OCV_table_lookup(V_oc)
+  Pack SOC = SOH-weighted average of cell SOCs

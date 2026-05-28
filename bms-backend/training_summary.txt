@@ -1,0 +1,10 @@
+====================================================
+  Sentinel-BMS  —  Training Summary (Optimized)
+====================================================
+
+MINIMIZED MODEL OUTPUTS
+------------------------------
+  soh_cell1
+  soh_cell2
+  soh_cell3
+  soc_pack
