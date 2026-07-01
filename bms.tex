@@ -1,0 +1,213 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{url}
+
+\begin{document}
+
+\title{Sentinel-BMS: A Cloud-Assisted Edge-Computing Battery Management System for 3S Li-ion Battery Pack with High-Precision SOC/SOH Estimation and Passive Cell Balancing}
+
+\author{\IEEEauthorblockN{Vijay Deshmukh}
+\IEEEauthorblockA{\textit{Department of Electrical Engineering} \\
+\textit{IIEST, Shibpur}\\
+Howrah, West Bengal, India \\
+vijay.deshmukh93077@gmail.com}
+\and
+\IEEEauthorblockN{Pritam Paral}
+\IEEEauthorblockA{\textit{Department of Electrical Engineering} \\
+\textit{IIEST, Shibpur}\\
+Howrah, West Bengal, India, 711103 \\
+callinpritam@gmail.com}
+}
+
+\maketitle
+
+\begin{abstract}
+Reliable state estimation and string equalization in Lithium-ion battery packs remain critical operational challenges for electric vehicles and portable electronics. This paper introduces Sentinel-BMS, an integrated hardware-software Battery Management System engineered for a 3-cell (3S) series configuration. Utilizing an ESP32 microcontroller as an edge-computing gateway, the system captures real-time cell parameters and total pack current via a high-precision ACS712 Hall-effect sensor. We implement a dual-framework architecture where a low-overhead Extended Kalman Filter runs locally on the edge for real-time State of Charge tracking. Concurrently, a 13-column physics-motivated Gradient Boosting Regressor paired with Isotonic Calibration executes on a cloud backend to determine individual cell State of Health and predict aging degradation. Furthermore, an onboard hardware passive balancing mechanism mitigates cell capacity mismatches during the charging cycle. Experimental results demonstrate high estimation accuracy with minimal computational overhead on the edge node, validating an affordable yet scalable framework for modern battery Diagnostics \& State Estimation.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Battery Management System, ESP32, Extended Kalman Filter, Gradient Boosting Regression, Isotonic Calibration, State of Charge, State of Health, Passive Balancing, Precision Sensing, Hall Effect.
+\end{IEEEkeywords}
+
+\section{Introduction}
+Lithium-ion (Li-ion) batteries become the most dominant energy storage technology powering the modern world. Their wide adoption across consumer electronics, utility-scale grid storage, and electric vehicle (EV) is driven by outstanding electrochemical characteristics, including high volumetric energy densities, prolonged cycle life, low self-discharge rates and reliability.
+
+However, the chemical volatility of Li-ion cells presents severe operational safety challenges. Operating a high-energy cell outside its rigid Safe Operating Area triggers irreversible degradation and catastrophic structural failure. Over-charging beyond the upper voltage ceiling forces metallic lithium plating onto the carbon anode, creating conductive dendrites that pierce internal separators to cause dead short-circuits. Conversely, deep discharging below minimum voltage thresholds causes copper current collectors to dissolve into the electrolyte matrix, leading to permanent capacity fade. Under extreme electrical, thermal, or mechanical stress, these internal failures can escalate into thermal runaway—a self-sustaining, exothermic chain reaction that releases toxic gases, intense fire, and explosive energy.
+
+To mitigate these risks, a robust Battery Management System (BMS) is indispensable. A modern BMS acts as the important electronic brain of the battery installation. Beyond execution of real-time safety logic, isolation switching, and cell balancing, a premier objective of a modern BMS is providing accurate online estimations of unmeasurable internal states: State of Charge (SOC) as a real-time fuel gauge, and State of Health (SOH) to monitor long-term capacity fade and internal resistance growth.
+
+Running these state estimation algorithms in real time is a major hurdle for standard embedded microcontrollers. While highly accurate electrochemical models, complex Kalman filter matrices, and deep learning setups track battery states beautifully, they require intense math and heavy floating-point arithmetic. Low-cost edge hardware simply doesn’t have the processing power or memory to handle such dense data streams without slowing down the critical, time-sensitive safety loops that prevent catastrophic failures. On the flip side, cutting corners with basic approximations like static lookup tables causes tracking accuracy to fall off a cliff the moment the battery faces a real-world, dynamic workload.
+
+To resolve this architectural mismatch, this paper introduces Sentinel-BMS, a hybrid edge-cloud framework engineered for 3-cell series battery arrays. The core design philosophy centers on an asymmetrical split of the computational load. Immediate, time-critical safety routines (over-voltage, under-voltage, over-current, and thermal fault interrupts), hysteretic passive cell balancing logic, and high-frequency SOC tracking via an Extended Kalman Filter (EKF) loop are processed locally on an ESP32 microcontroller board.
+
+At the same time, data that isn't time-sensitive is bundled into clean JSON payloads and sent over HTTP to a cloud backend built on Python and FastAPI. Once on the cloud, this historical data passes through a specialized 13-column feature pipeline rooted in battery physics, followed by a calibrated Gradient Boosting Regressor model. By moving this heavy math to the cloud, the engine can accurately calculate individual cell SOH without bogging down the local ESP32 or risking a software freeze that could crash the critical edge safety loop.
+
+The remaining sections of this paper are organized as follows: Section II describes the system hardware architecture and physical prototype topology. Section III elaborates on the software-controlled passive cell balancing mechanism. Section IV details the formulation of the edge-side Extended Kalman Filter for real-time SOC tracking. Section V describes the cloud-assisted machine learning pipeline for SOH estimation. Section VI presents the web-based visualization telemetry interface. Section VII details the experimental verification setup and performance results, and Section VIII concludes the paper with directions for future work.
+
+\section{System Hardware Architecture}
+The experimental prototype of the Sentinel-BMS is realized on a dual-layer prototyping matrix optimized for a 3-cell series Lithium-Ion topology. The primary components of the hardware layer include:
+\begin{itemize}
+    \item \textbf{Edge Computing Core:}At the heart of the hardware layer is an ESP-32 dual-core micro-controller running at 240 MHz, which acts as the main control hub. To keep the system running smoothly without bottlenecks, the workload is split cleanly between the two processing cores: Core 0 is entirely dedicated to time-critical tasks like gathering sensor data, filtering out signal noise, and firing immediate safety shutdowns if something goes wrong. Meanwhile, Core 1 operates in the background, handling the Wi-Fi network connection and streaming telemetry data asynchronously.
+    \item \textbf{Data Acquisition Layer:} For data acquisition, the system reads real-time cell voltages directly through the edge microcontroller's analog inputs to track individual potential steps. At the same time, total pack current is monitored continuously using an ACS712 linear current sensor module. The ACS712 uses Hall-effect magnetic field detection to output an analog voltage proportional to the bidirectional DC current flowing through its internal copper path. By using this magnetic sensing method, we completely eliminate the need for intrusive series shunt resistors, keeping the power path clean and reducing efficiency losses.
+    
+    \item \textbf{Protection Circuitry:} Safety and fault recovery are managed through a series-pass MOSFET network driven by dedicated gate Driver pathways. This interlock layer continuously protects the battery pack from catastrophic damage by enforcing automatic trip cuts during over-voltage, cell overload (over-current), or dangerous temperature rise conditions during both charging and discharging cycles.
+\end{itemize}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{architecture_diagram.jpg}
+    \caption{Sentinel-BMS architecture block diagram, detailing local sensing execution, edge-cloud communication channels, and the frontend React diagnostic dashboard..}
+    \label{fig:architecture}
+\end{figure}
+\section{Passive Cell Balancing Mechanism}
+Due to manufacturing tolerances, chemical variance, and localized thermal gradients, individual cells in a series string inevitably develop mismatches in capacity and internal resistance over time. Unbalanced cells limit the usable capacity of the overall pack, as the weakest cell reaches the lower cutoff voltage first during discharge, and the strongest cell reaches the upper cutoff first during charging.
+
+Sentinel-BMS incorporates a software-controlled passive cell balancing network on the edge board. The system utilizes a shunt resistor topology combined with low-$R_{DS(on)}$ N-channel MOSFETs (2N7000) acting as electronic switches, isolated via logic-level gate pathways. 
+
+When the pack is charging and individual cell voltages surpass a balancing activation threshold ($V_{bal} = 4.15$~V), the ESP32 computes the voltage variance:
+\begin{equation}
+\Delta V_{cell} = V_{cell,i} - \min(V_{cell,1}, V_{cell,2}, V_{cell,3})
+\end{equation}
+
+If $\Delta V_{cell} > V_{thresh}$ (where $V_{thresh}$ is typically set to 10 mV), the GPIO corresponding to the highest voltage cell is driven HIGH. This closes the MOSFET switch, routing a portion of the charging current through a power dissipation resistor ($R_{pass} = 10000~\Omega$), diverting current away from the fully charged cell while allowing the remaining lower-voltage cells to catch up. The power dissipated as heat through the balancing resistor is governed by:
+\begin{equation}
+P_{diss} = \frac{(V_{cell,i})^{2}}{R_{pass}}
+\end{equation}
+
+This state machine cycles during the constant-voltage charging phase until cell voltage equilibrium is achieved.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{circuit_diagram.jpg}
+    \caption{Onboard passive cell balancing circuit diagram showing the ESP32 GPIO interface control pathways connected via 10 k$\Omega$ base resistors to small-signal 2N7000 N-channel MOSFET switches, routing bypass currents through individual 15000 $\Omega$ power shunt dissipation resistors ($R_1, R_2, R_3$) across the 3S battery string.}
+    \label{fig:circuit}
+\end{figure}
+
+\vspace{0.5cm} % Adds a 0.5 cm vertical gap
+
+\section{State of Charge (SOC) Estimation Engine}
+To achieve high accuracy on the edge computing node without exhausting the static RAM of the ESP32, a discrete-time Extended Kalman Filter (EKF) is implemented based on a first-order Equivalent Circuit Model (ECM) of the cell. The ECM consists of an open-circuit voltage $V_{oc}(SOC)$ in series with an internal ohmic resistance $R_0$ and a parallel RC network ($R_1, C_1$) representing activation polarization and diffusion effects.
+
+A critical challenge in real-time SOC tracking is compensating for the transient voltage sag that occurs immediately after a heavy load is applied to the battery array. This voltage drop is a composite response of the immediate ohmic voltage drop across $R_0$ and the slower, time-dependent polarization diffusion response across the $R_1C_1$ transient layer. By accounting for this sudden dynamic deflection within the measurement innovation step, the EKF prevents the algorithm from misinterpreting a brief load-induced voltage sag as an instantaneous collapse of the underlying state of charge.
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{voltage_sag_correction.png}
+    \caption{Dynamic voltage sag correction performance baseline showcasing the recovered open-circuit voltage ($V_{\text{oc}}$) tracking linearly despite a prominent 2.5~A transient step-load induced terminal voltage drop ($V_{\text{terminal}}$).}
+    \label{fig:voltage_sag_correction}
+\end{figure}
+
+The state-space equations governing the battery dynamics are formulated as:
+\begin{equation}
+x_{k+1} = A_k x_k + B_k u_k + w_k
+\end{equation}
+\begin{equation}
+y_k = g(x_k, u_k) + v_k
+\end{equation}
+
+Where the state vector $x_k = [SOC_k, V_{1,k}]^T$, the input $u_k$ is the measured pack current $I_k$ extracted via the ACS712 sensor, and $w_k$, $v_k$ represent the process and measurement white noise vectors respectively. The state transition matrix $A_k$ and input matrix $B_k$ are expressed via:
+\begin{equation}
+A_k = \begin{bmatrix} 1 & 0 \\ 0 & \exp(-\frac{\Delta t}{R_1 C_1}) \end{bmatrix}
+\end{equation}
+\begin{equation}
+B_k = \begin{bmatrix} -\frac{\eta \Delta t}{C_n} \\ R_1(1 - \exp(-\frac{\Delta t}{R_1 C_1})) \end{bmatrix}
+\end{equation}
+
+Here, $\eta$ represents the Coulombic efficiency, $\Delta t$ is the sampling interval time (100 ms), and $C_n$ is the nominal capacity of the cell. The observation equation mapping state to terminal voltage $V_t$ captures both the relaxed open-circuit value and the dynamic voltage sag factors:
+\begin{equation}
+V_{t,k} = V_{oc}(SOC_k) - V_{1,k} - I_k R_0
+\end{equation}
+
+The EKF continuous update cycle handles time propagation and measurement corrections locally on the ESP32. The observation matrix linearization is computed dynamically at each step using the partial derivative:
+\begin{equation}
+H_k = \begin{bmatrix} \frac{\partial V_{oc}}{\partial SOC} & -1 \end{bmatrix}\bigg|_{x_k = \hat{x}_k^-}
+\end{equation}
+
+The recursive execution steps inside the micro-controller follow standard Kalman loops:
+\begin{enumerate}
+    \item State Time Update: $\hat{x}_k^- = A_{k-1}\hat{x}_{k-1}^+ + B_{k-1}u_{k-1}$
+    \item Covariance Time Update: $P_k^- = A_{k-1}P_{k-1}^+A_{k-1}^T + Q$
+    \item Kalman Gain Calculation: $K_k = P_k^-H_k^T(H_kP_k^-H_k^T + R)^{-1}$
+    \item Measurement Correction: $\hat{x}_k^+ = \hat{x}_k^- + K_k(V_{t,k} - g(\hat{x}_k^-, u_k))$
+    \item Covariance Correction: $P_k^+ = (I - K_kH_k)P_k^-$
+\end{enumerate}
+
+\section{Cloud-Assisted State of Health (SOH) Estimation}
+while soc varies from 0-100\% rapidly over a discharge cycle, state of health(SOH) degrades very slowly across multiple charge discharge cycles. SOH is mainly defined as the ratio of the maximum current available capacity ($C_{max}$) to the nominal initial capacity of the battery. ($C_{rated}$):
+\begin{equation}
+SOH = \frac{C_{max}}{C_{rated}} \times 100\%
+\end{equation}
+
+\subsection{Degradation Analysis and Parametric Indicators}
+To track how a battery degrades over time, the system looks closely at two closely linked warning signs: rising temperatures and internal resistance ($R_0$) growth. As a battery pack ages, a layer called the solid-electrolyte interphase (SEI) continuously builds up inside the cells, and active chemical materials are slowly lost. This buildup drives up the cell's internal resistance, which directly amplifies ohmic losses—meaning a lot more energy is wasted as heat during heavy workloads.Our cloud platform spots this behavior by matching the live current data from the ACS712 sensor with temperature logs of the pack. If a cell's temperature starts to spike rapidly ($\frac{\Delta T}{\Delta t}$) while the current remains steady, it is a clear sign that the internal resistance has grown and the cell is degrading. To turn these physical changes into accurate predictions, the cloud backend takes raw voltage ($V$), absolute current ($I$), and temperature ($T$) data at inference time and reshapes them into a 13-column feature matrix. Each of these engineered parameters is rooted directly in battery physics rather than generic data correlations.
+\begin{enumerate}
+    \item \textbf{Base Telemetry Signatures:} Comprising the unscaled raw arrays of $V$, $I$, and $T$.
+    \item \textbf{Instantaneous Power Consumption:} Structured as $V \times I$ to outline operational energy metrics.
+    \item \textbf{Approximate OCV (Nominal Sag Removal):} Modeled via $V + I \times R_{0,nominal}$ to extract estimated chemical equilibrium vectors.
+    \item \textbf{Joule Heating Power Dissipation Rate:} Formulated via $I^2 \times R_{0,nominal}$ to track ohmic loss variance.
+    \item \textbf{Thermal Abuse Constraint:} Isolated via $\max(T - 30.0, 0.0)$ to bound over-temperature environmental exposure.
+    \item \textbf{Voltage Depletion Delta:} Measured via $4.2 - V$ to reflect structural electrochemical depth.
+    \item \textbf{High C-Rate Stress Bound:} Evaluated via $\max(I - 1.0, 0.0)$ to record excessive kinetic transport conditions.
+    \item \textbf{Pseudo-Impedance Proxy:} Evaluated via $V / \max(I, 0.1)$ to serve as a reliable tracking indicator for internal resistance growth.
+    \item \textbf{Depletion-Current Interaction:} Structured as $(4.2 - V) \times I$ to capture multi-variable load curves.
+    \item \textbf{Non-linear Scaling Properties:} Derived from $V^2$ and $T^2$ signatures to expand high-order polynomial variance spaces.
+\end{enumerate}
+
+\subsection{Cloud Inference Framework}
+On the cloud layer, the server runs a Gradient Boosting Regressor (GBR) coupled with an Isotonic Regression calibration layer to process the 13 engineered physics features. While the GBR architecture is excellent at catching complex, non-linear interactions between variables—like recognizing that a low terminal voltage under a high load current points to progressive cell degradation—tree-based models naturally tend to compress variance toward the mean. The Isotonic Calibrator fixes this range-compression bias, restoring the predicted State of Health (SOH) back to its true, full operational scale. To make these health metrics practically useful for the physical pack, the cloud engine maps the estimated SOH directly to internal resistance boundaries ($R_{\text{internal}}$). This linear relation is verified by a strong Pearson correlation coefficient of $r = -0.997$ within the training data. Ultimately, this allows the system to compute a health-weighted pack SOC, dynamically scaling down the runtime contribution of degraded cells to prevent unexpected capacity drops.
+
+\section{Software Implementation and Full-Stack Integration}
+The end-to-end framework layout is structured into three distinct repositories to maintain separation of concerns:
+\begin{itemize}
+    \item \textbf{Firmware Layer (C++/Arduino):} Deployed on the ESP32 core. It handles sensor signal tracking, executes local real-time EKF estimation vectors, processes hardware interlocking protection checks, bundles data packets into compact JSON strings, and sends the collected data to the backend using the push request on the specified IP address.
+    \item \textbf{Backend Processing Layer (Python):} A FastAPI microservice manages incoming telemetry by hosting a dedicated endpoint to receive data payloads directly from the edge hardware. Instead of archiving historical logs to an external database layer, the service maintains volatile system parameters within shared memory and immediately drops structured telemetry arrays directly into the loaded machine learning model via an inline asynchronous execution pipeline to perform real-time SOH and pack SOC estimations.
+    \item \textbf{Frontend Diagnostic Dashboard (React/Next.js):} A highly responsive single-page user dashboard styled using Tailwind CSS and components from Shadcn UI provides real-time multi-cell voltage telemetry plots, active balancing flag indicators, and historical SOH degradation trends.
+\end{itemize}
+
+\section{Experimental Results and Discussion}
+The Sentinel-BMS prototype was validated in the laboratory using a custom 3S battery pack made of salvaged 5000mAh cells, a DC 12V Johnson motor (inductive) load, and a variable power supply. To handle the noise and non-linearity of the low-cost ACS712 current sensor, a 20-sample moving average filter and manual calibration curve were implemented on Core 0 of the ESP32.
+
+The local Extended Kalman Filter (EKF) successfully adapted to transient voltage sags under a 340 mA load. By isolating the internal resistance ohmic drop, it prevented false state-of-charge tracking drops, achieving an accurate State of Charge of the battery pack.
+
+For health tracking, the data was sent over the campus Wi-Fi to a cloud server running a FastAPI web script. for the safety purpose all the critical controls like overvoltage protection, overload or temperature rise are all controlled by ESP-32 to protect battery even when the internet is disconnected. The cloud server took the raw data and converted it into five easy-to-track battery stress markers, including temperature spikes and power loss. A Gradient Boosting machine learning model read these markers to spot aging patterns---like when a cell's voltage drops too low under a heavy load. This smart cloud setup accurately tracked how the battery was wearing out over time.
+
+Finally, the passive cell balancing state machine equalized cell differences down to a tight 12 mV baseline via a 2N7000 MOSFET layout.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\linewidth]{hardware_setup.jpg}
+    \caption{Experimental hardware setup of the Sentinel-BMS used during laboratory testing, featuring the ESP32 core, a 3S 18650 Lithium-Ion cell string, and custom discrete components mounted on a dot-matrix testing board.}
+    \label{fig:hardware}
+\end{figure}
+
+\section{Conclusion}
+This paper has presented Sentinel-BMS, a scalable, cloud-assisted, and high-precision edge-computing Battery Management System architecture explicitly developed for a 3-cell series (3S) Lithium-Ion battery configuration. By pairing a low-cost, high-performance ESP32 edge gateway with a lightweight cloud computational framework, the system achieves an optimized balance between real-time embedded execution and deep analytics. Time-critical tasks including localized safety logic, high-speed over-current and over-temperature protection interrupts, discrete 2N7000 MOSFET-driven passive cell balancing, and first-order Extended Kalman Filter (EKF) calculations are processed entirely on the edge node inside a tight sampling window. Concurrently, non-time-critical telemetry data is pushed over an HTTP JSON pipeline to a Python FastAPI backend service. This asynchronous cloud pipeline leverages a 13-column physics-based feature transformation alongside a calibrated Gradient Boosting Regressor model to estimate individual cell State of Health (SOH) and map complex capacity fade patterns without saturating the embedded processor.
+
+Experimental testing under dynamic workloads confirms that this joint edge-cloud setup handles demanding operational conditions smoothly, providing highly reliable state of charge (SOC) tracking while keeping cell voltage imbalances within a tight 12 mV window. Moving forward, our research will focus on replacing the power-wasting passive resistors with high-efficiency active cell balancing topologies—such as switched-capacitor configurations or inductive energy transfer circuits—to reduce overall heat generation. We also plan to scale the cloud infrastructure to support decentralized, peer-to-peer balancing control frameworks across larger, high-voltage multi-pack battery systems.
+
+\begin{thebibliography}{15}
+\bibitem{1} G. L. Plett, ``Extended Kalman filtering for battery management systems of LiPB-based HEV battery packs: Part 1. Background,'' \textit{Journal of Power Sources}, vol. 134, no. 2, pp. 252-261, Aug. 2004.
+\bibitem{2} K. A. Severson et al., ``Data-driven prediction of battery cycle life before capacity degradation,'' \textit{Nature Energy}, vol. 4, no. 5, pp. 383-391, May 2019.
+\bibitem{3} X. Sui, ``A review of lithium-ion battery state of health estimation based on machine learning,'' \textit{Applied Energy}, vol. 228, pp. 1200-1216, Oct. 2018.
+\bibitem{4} FreshersStaff, ``Battery State of Health Dataset: Multi-cycle measurements of lithium-ion batteries for new energy vehicles,'' \textit{Kaggle Datasets}, 2024. [Online]. Available: \url{https://www.kaggle.com/datasets/freshersstaff/battery-state-of-health-dataset}.
+\bibitem{5} L. Yao and Y. Chen, ``Gradient Boosting Decision Tree based State of Health Estimation for Lithium-ion Batteries,'' \textit{Energy Proceedings}, vol. 24, pp. 1-6, Nov. 2022.
+\bibitem{6} J. Qin, S. He, and R. Vatajna, ``State of health prediction for lithium-ion battery using a gradient boosting-based data-driven method,'' \textit{Microelectronics Reliability}, vol. 126, p. 114302, Nov. 2021.
+\bibitem{7} Z. Chen, K. Liu, and J. Jiang, ``State of Health Estimation for Lithium-Ion Batteries Using an Explainable XGBoost Model with Parameter Optimization,'' \textit{Batteries}, vol. 10, no. 11, p. 394, Nov. 2024.
+\bibitem{8} Y. Sun, X. Zhang, and L. Wang, ``Research on Lithium-Ion Battery State of Health Prediction Based on XGBoost-ARIMA Joint Optimization,'' \textit{Batteries}, vol. 11, no. 6, p. 207, Jun. 2025.
+\bibitem{9} R. Xiong, H. He, and F. Sun, ``A comparative study of equivalent circuit models for lithium-ion batteries in electric vehicles,'' \textit{Applied Energy}, vol. 112, pp. 938-948, Dec. 2013.
+\bibitem{10} X. Hu, S. E. Li, and H. Peng, ``A comparative study of equivalent circuit models for Li-ion batteries,'' \textit{Journal of Power Sources}, vol. 198, pp. 359-367, Jan. 2012.
+\bibitem{11} M. Chen and G. A. Rincon-Mora, ``Accurate electrical battery model capable of predicting runtime and I-V performance,'' \textit{IEEE Transactions on Energy Conversion}, vol. 21, no. 2, pp. 504-511, Jun. 2006.
+\bibitem{12} M. A. Hannan, M. S. H. Lipu, and A. Hussain, ``A review of lithium-ion battery state of charge estimation and management system in electric vehicle applications: Challenges and recommendations,'' \textit{Renewable and Sustainable Energy Reviews}, vol. 78, pp. 834-854, Oct. 2017.
+\bibitem{13} X. Han, M. Ouyang, and L. Lu, ``A comparative study of commercial lithium-ion battery cycle life in electrical vehicle applications,'' \textit{Journal of Power Sources}, vol. 251, pp. 38-54, Apr. 2014.
+\bibitem{14} J. Zhang, J. Lee, and Y. Cheng, ``Experimental and numerical study on the electro-thermal behavior of lithium-ion batteries under high current discharge profiles,'' \textit{Applied Thermal Engineering}, vol. 143, pp. 102-111, Oct. 2018.
+\bibitem{15} L. Cao, Z. Mu, and J. Zhang, ``A comparative study of passive and active cell balancing methods for multi-cell lithium-ion batteries,'' \textit{IEEE Access}, vol. 9, pp. 115201-115215, Aug. 2021.
+%% --- REGRESSION CALIBRATION & ISOTONIC SCALING ---
+\bibitem{16} A. Niculescu-Mizil and R. Caruana, ``Predicting good probabilities with supervised learning,'' in 
+\textit{Proceedings of the 22nd International Conference on Machine Learning (ICML)}, pp. 625-632, 2005.
+\end{thebibliography}
+
+\end{document}

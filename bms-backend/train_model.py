@@ -268,6 +268,7 @@ def write_summary(out_dir: str, metrics_cv: dict, metrics_test: dict) -> None:
 
 
 def main():
+
     parser = argparse.ArgumentParser(description="Sentinel-BMS train.py — Optimized Minimal Output")
     parser.add_argument("--data", default="battery_dataset.csv", help="Path to the dataset CSV")
     parser.add_argument("--output", default=".", help="Output directory")
